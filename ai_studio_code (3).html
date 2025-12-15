@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Foss Hill Labs</title>
+    
+    <!-- Google Fonts: Space Grotesk -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* RESET & BASE */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #050505; /* Deepest black */
+            color: #ffffff;
+            font-family: 'Space Grotesk', sans-serif;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden; /* No Scroll */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        /* CANVAS BACKGROUND */
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            opacity: 0.9; /* High opacity for crisp lines */
+        }
+
+        /* GRAIN OVERLAY */
+        .grain-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 2;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.07'/%3E%3C/svg%3E");
+        }
+
+        /* VIGNETTE */
+        .vignette {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 3;
+            background: radial-gradient(circle, rgba(0,0,0,0) 20%, rgba(5,5,5,1) 95%);
+            pointer-events: none;
+        }
+
+        /* TEXT CONTENT */
+        .content {
+            position: relative;
+            z-index: 4;
+            text-align: center;
+            mix-blend-mode: exclusion; 
+        }
+
+        h1 {
+            font-size: clamp(2.5rem, 6vw, 5rem);
+            font-weight: 700; 
+            letter-spacing: -0.06em;
+            text-transform: normal;
+            color: #ededed;
+            opacity: 0;
+            animation: fadeIn 2.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            animation-delay: 0.2s;
+        }
+
+        /* ANIMATIONS */
+        @keyframes fadeIn {
+            0% {
+                opacity: 0;
+                transform: translateY(30px) scale(0.95);
+                filter: blur(12px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: blur(0);
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="topographyCanvas"></canvas>
+    <div class="grain-overlay"></div>
+    <div class="vignette"></div>
+
+    <div class="content">
+        <h1>Foss Hill Labs</h1>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('topographyCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let width, height;
+        // Coordinates for the "camera" position
+        let cameraX = 0;
+        let cameraY = 0;
+
+        const config = {
+            dotSize: 0.85,     // Very small dots for thin lines
+            spacing: 3,        // Tight grid for high resolution
+            speed: 0.25,       // Panning speed (pixels per frame)
+            scale: 0.002,      // Zoom level of the map
+        };
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+
+        // Calculates height at a specific "World Coordinate"
+        // Because we pass (x + cameraX), the shape remains rigid while we move.
+        function getElevation(x, y) {
+            let sc = config.scale;
+
+            // DOMAIN WARPING (The "Wavy" look)
+            // We distort the coordinate space itself to make lines wiggle naturaly.
+            // Crucial: The warp relies on the WORLD coordinates (x,y), so the warp
+            // travels WITH the terrain.
+            
+            let dx = x + Math.sin(y * sc * 0.4) * 150; 
+            let dy = y + Math.cos(x * sc * 0.4) * 150;
+            
+            // Calculate height from warped coordinates
+            let val1 = Math.sin(dx * sc);
+            let val2 = Math.cos(dy * sc * 0.7);
+            
+            // Add a secondary layer for detail
+            let val3 = Math.sin((dx + dy) * sc * 1.5);
+
+            // Normalize
+            return (val1 + val2 + val3 + 3) / 6;
+        }
+
+        function draw() {
+            // Clear screen
+            ctx.fillStyle = '#050505';
+            ctx.fillRect(0, 0, width, height);
+            
+            ctx.fillStyle = '#e0e0e0';
+
+            // Loop through SCREEN pixels
+            for (let x = 0; x < width; x += config.spacing) {
+                for (let y = 0; y < height; y += config.spacing) {
+                    
+                    // Convert Screen Coord -> World Coord
+                    // This creates the "Panning" effect
+                    let worldX = x + cameraX;
+                    let worldY = y + cameraY;
+
+                    let h = getElevation(worldX, worldY);
+                    
+                    // BANDING
+                    // Multiplier 100 = Very high frequency (lots of lines)
+                    // Math.sin creates the rings
+                    let band = Math.abs(Math.sin(h * 100)); 
+
+                    // Threshold
+                    // > 0.95 keeps the lines very thin and sharp
+                    if (band > 0.95) {
+                        ctx.fillRect(x, y, config.dotSize, config.dotSize);
+                    } 
+                }
+            }
+
+            // Move the camera diagonally
+            cameraX += config.speed;
+            cameraY += config.speed;
+
+            requestAnimationFrame(draw);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+        draw();
+    </script>
+</body>
+</html>
