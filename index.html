@@ -2,200 +2,187 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Viewport fix prevents zooming and ensures correct scale on mobile -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Foss Hill Labs</title>
-    
-    <!-- Google Fonts: Space Grotesk -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-    
     <style>
-        /* RESET & BASE */
-        * {
+        body {
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            /* Prevents scroll bounce/refresh behavior on mobile */
+            touch-action: none; 
         }
 
-        body {
-            background-color: #050505; /* Deepest black */
-            color: #ffffff;
-            font-family: 'Space Grotesk', sans-serif;
-            height: 100vh;
-            width: 100vw;
-            overflow: hidden; /* No Scroll */
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-        }
-
-        /* CANVAS BACKGROUND */
         canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 1;
-            opacity: 0.9; /* High opacity for crisp lines */
+            display: block;
+            outline: none;
         }
 
-        /* GRAIN OVERLAY */
-        .grain-overlay {
+        #overlay {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 2;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.07'/%3E%3C/svg%3E");
-        }
-
-        /* VIGNETTE */
-        .vignette {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 3;
-            background: radial-gradient(circle, rgba(0,0,0,0) 20%, rgba(5,5,5,1) 95%);
-            pointer-events: none;
-        }
-
-        /* TEXT CONTENT */
-        .content {
-            position: relative;
-            z-index: 4;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%; /* prevent text hitting edges */
             text-align: center;
-            mix-blend-mode: exclusion; 
+            pointer-events: none;
+            z-index: 10;
         }
 
         h1 {
-            font-size: clamp(2.5rem, 6vw, 5rem);
-            font-weight: 700; 
-            letter-spacing: -0.06em;
-            text-transform: normal;
-            color: #ededed;
-            opacity: 0;
-            animation: fadeIn 2.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-            animation-delay: 0.2s;
+            color: #ffffff;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            text-shadow: 0 4px 30px rgba(0, 0, 0, 0.8);
+            margin: 0;
+            
+            /* Desktop size */
+            font-size: 4vw; 
         }
 
-        /* ANIMATIONS */
-        @keyframes fadeIn {
-            0% {
-                opacity: 0;
-                transform: translateY(30px) scale(0.95);
-                filter: blur(12px);
-            }
-            100% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: blur(0);
+        /* Mobile Optimization for Text */
+        @media (max-width: 768px) {
+            h1 {
+                /* Make text much larger on portrait screens */
+                font-size: 8vw; 
+                line-height: 1.1;
             }
         }
     </style>
 </head>
 <body>
 
-    <canvas id="topographyCanvas"></canvas>
-    <div class="grain-overlay"></div>
-    <div class="vignette"></div>
-
-    <div class="content">
+    <div id="overlay">
         <h1>Foss Hill Labs</h1>
     </div>
 
-    <script>
-        const canvas = document.getElementById('topographyCanvas');
-        const ctx = canvas.getContext('2d');
+    <!-- Import Three.js -->
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
-        let width, height;
-        // Coordinates for the "camera" position
-        let cameraX = 0;
-        let cameraY = 0;
-
-        const config = {
-            dotSize: 0.85,     // Very small dots for thin lines
-            spacing: 3,        // Tight grid for high resolution
-            speed: 0.25,       // Panning speed (pixels per frame)
-            scale: 0.002,      // Zoom level of the map
+        // --- Configuration ---
+        const CONFIG = {
+            colorHigh: new THREE.Color(0x00ffff),
+            colorLow: new THREE.Color(0x001133),
+            speed: 0.15,
+            // 96 is lower than 128, saves battery on mobile but still looks smooth
+            gridSize: 96, 
         };
 
-        function resize() {
-            width = canvas.width = window.innerWidth;
-            height = canvas.height = window.innerHeight;
-        }
+        // --- Scene ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050505);
+        scene.fog = new THREE.FogExp2(0x050505, 0.06);
 
-        // Calculates height at a specific "World Coordinate"
-        // Because we pass (x + cameraX), the shape remains rigid while we move.
-        function getElevation(x, y) {
-            let sc = config.scale;
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 2.5, 6.5);
+        camera.lookAt(0, 0, 0);
 
-            // DOMAIN WARPING (The "Wavy" look)
-            // We distort the coordinate space itself to make lines wiggle naturaly.
-            // Crucial: The warp relies on the WORLD coordinates (x,y), so the warp
-            // travels WITH the terrain.
-            
-            let dx = x + Math.sin(y * sc * 0.4) * 150; 
-            let dy = y + Math.cos(x * sc * 0.4) * 150;
-            
-            // Calculate height from warped coordinates
-            let val1 = Math.sin(dx * sc);
-            let val2 = Math.cos(dy * sc * 0.7);
-            
-            // Add a secondary layer for detail
-            let val3 = Math.sin((dx + dy) * sc * 1.5);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        
+        // Critical for mobile performance: max out at 2x pixel density (Retina), ignore 3x
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
+        
+        document.body.appendChild(renderer.domElement);
 
-            // Normalize
-            return (val1 + val2 + val3 + 3) / 6;
-        }
+        // --- Shaders (Same as before, GPU driven) ---
+        const vertexShader = `
+            uniform float uTime;
+            varying float vElevation;
 
-        function draw() {
-            // Clear screen
-            ctx.fillStyle = '#050505';
-            ctx.fillRect(0, 0, width, height);
-            
-            ctx.fillStyle = '#e0e0e0';
-
-            // Loop through SCREEN pixels
-            for (let x = 0; x < width; x += config.spacing) {
-                for (let y = 0; y < height; y += config.spacing) {
-                    
-                    // Convert Screen Coord -> World Coord
-                    // This creates the "Panning" effect
-                    let worldX = x + cameraX;
-                    let worldY = y + cameraY;
-
-                    let h = getElevation(worldX, worldY);
-                    
-                    // BANDING
-                    // Multiplier 100 = Very high frequency (lots of lines)
-                    // Math.sin creates the rings
-                    let band = Math.abs(Math.sin(h * 100)); 
-
-                    // Threshold
-                    // > 0.95 keeps the lines very thin and sharp
-                    if (band > 0.95) {
-                        ctx.fillRect(x, y, config.dotSize, config.dotSize);
-                    } 
-                }
+            vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
+            float snoise(vec2 v){
+                const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+                vec2 i  = floor(v + dot(v, C.yy) );
+                vec2 x0 = v -   i + dot(i, C.xx);
+                vec2 i1;
+                i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+                vec4 x12 = x0.xyxy + C.xxzz;
+                x12.xy -= i1;
+                i = mod(i, 289.0);
+                vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0 ));
+                vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+                m = m*m ;
+                m = m*m ;
+                vec3 x = 2.0 * fract(p * C.www) - 1.0;
+                vec3 h = abs(x) - 0.5;
+                vec3 ox = floor(x + 0.5);
+                vec3 a0 = x - ox;
+                m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+                vec3 g;
+                g.x  = a0.x  * x0.x  + h.x  * x0.y;
+                g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+                return 130.0 * dot(m, g);
             }
 
-            // Move the camera diagonally
-            cameraX += config.speed;
-            cameraY += config.speed;
+            void main() {
+                vec3 pos = position;
+                float noiseElevation = snoise(vec2(pos.x * 0.3, pos.z * 0.3 + uTime * 0.5)) * 1.5;
+                noiseElevation += snoise(vec2(pos.x * 1.0, pos.z * 1.0 + uTime * 0.5)) * 0.2;
+                pos.y += noiseElevation;
+                vElevation = noiseElevation; 
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+            }
+        `;
 
-            requestAnimationFrame(draw);
+        const fragmentShader = `
+            uniform vec3 uColorHigh;
+            uniform vec3 uColorLow;
+            varying float vElevation;
+            void main() {
+                float mixStrength = (vElevation + 1.0) / 2.5;
+                vec3 color = mix(uColorLow, uColorHigh, mixStrength);
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        // --- Mesh ---
+        const geometry = new THREE.PlaneGeometry(22, 22, CONFIG.gridSize, CONFIG.gridSize);
+        geometry.rotateX(-Math.PI / 2);
+
+        const material = new THREE.ShaderMaterial({
+            vertexShader: vertexShader,
+            fragmentShader: fragmentShader,
+            uniforms: {
+                uTime: { value: 0 },
+                uColorHigh: { value: CONFIG.colorHigh },
+                uColorLow: { value: CONFIG.colorLow }
+            },
+            wireframe: true,
+            transparent: true
+        });
+
+        const terrain = new THREE.Mesh(geometry, material);
+        scene.add(terrain);
+
+        // --- Animation ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const elapsedTime = clock.getElapsedTime();
+            material.uniforms.uTime.value = elapsedTime * CONFIG.speed;
+            terrain.rotation.y = Math.sin(elapsedTime * 0.05) * 0.05;
+
+            renderer.render(scene, camera);
         }
 
-        window.addEventListener('resize', resize);
-        resize();
-        draw();
+        // --- Responsive Resize ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        });
+
+        animate();
+
     </script>
 </body>
 </html>
