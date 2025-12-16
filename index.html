@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <!-- Viewport fix prevents zooming and ensures correct scale on mobile -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Foss Hill Labs</title>
     <style>
@@ -12,7 +11,6 @@
             overflow: hidden;
             background-color: #050505;
             font-family: 'Helvetica Neue', Arial, sans-serif;
-            /* Prevents scroll bounce/refresh behavior on mobile */
             touch-action: none; 
         }
 
@@ -26,9 +24,9 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 90%; /* prevent text hitting edges */
+            width: 90%;
             text-align: center;
-            pointer-events: none;
+            pointer-events: none; /* Text remains unselectable */
             z-index: 10;
         }
 
@@ -39,15 +37,11 @@
             text-transform: uppercase;
             text-shadow: 0 4px 30px rgba(0, 0, 0, 0.8);
             margin: 0;
-            
-            /* Desktop size */
             font-size: 4vw; 
         }
 
-        /* Mobile Optimization for Text */
         @media (max-width: 768px) {
             h1 {
-                /* Make text much larger on portrait screens */
                 font-size: 8vw; 
                 line-height: 1.1;
             }
@@ -60,37 +54,31 @@
         <h1>Foss Hill Labs</h1>
     </div>
 
-    <!-- Import Three.js -->
     <script type="module">
         import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
-        // --- Configuration ---
         const CONFIG = {
             colorHigh: new THREE.Color(0x00ffff),
             colorLow: new THREE.Color(0x001133),
-            speed: 0.15,
-            // 96 is lower than 128, saves battery on mobile but still looks smooth
+            speed: 0.1, // Slower speed for "bigger" feeling hills
             gridSize: 96, 
         };
 
-        // --- Scene ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x050505);
-        scene.fog = new THREE.FogExp2(0x050505, 0.06);
+        scene.fog = new THREE.FogExp2(0x050505, 0.05); // Slightly lighter fog for distance
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-        camera.position.set(0, 2.5, 6.5);
+        // Moved camera up slightly to get a better view of the wider valleys
+        camera.position.set(0, 3.0, 6.5);
         camera.lookAt(0, 0, 0);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        
-        // Critical for mobile performance: max out at 2x pixel density (Retina), ignore 3x
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
-        
         document.body.appendChild(renderer.domElement);
 
-        // --- Shaders (Same as before, GPU driven) ---
+        // --- Shaders ---
         const vertexShader = `
             uniform float uTime;
             varying float vElevation;
@@ -122,10 +110,16 @@
 
             void main() {
                 vec3 pos = position;
-                float noiseElevation = snoise(vec2(pos.x * 0.3, pos.z * 0.3 + uTime * 0.5)) * 1.5;
-                noiseElevation += snoise(vec2(pos.x * 1.0, pos.z * 1.0 + uTime * 0.5)) * 0.2;
+                
+                // UPDATED:
+                // 1. Reduced multiplier (0.3 -> 0.1) creates wider, larger shapes
+                // 2. Amplitude (1.8) makes them tall enough to be seen
+                // 3. Removed the second "roughness" noise layer for a gentle look
+                float noiseElevation = snoise(vec2(pos.x * 0.1, pos.z * 0.1 + uTime * 0.3)) * 1.8;
+
                 pos.y += noiseElevation;
                 vElevation = noiseElevation; 
+
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
             }
         `;
@@ -135,14 +129,16 @@
             uniform vec3 uColorLow;
             varying float vElevation;
             void main() {
-                float mixStrength = (vElevation + 1.0) / 2.5;
+                // Adjusted mixing to account for new height range
+                float mixStrength = (vElevation + 1.0) / 3.0;
                 vec3 color = mix(uColorLow, uColorHigh, mixStrength);
                 gl_FragColor = vec4(color, 1.0);
             }
         `;
 
         // --- Mesh ---
-        const geometry = new THREE.PlaneGeometry(22, 22, CONFIG.gridSize, CONFIG.gridSize);
+        // Increased plane size slightly so the large hills don't get cut off abruptly
+        const geometry = new THREE.PlaneGeometry(26, 26, CONFIG.gridSize, CONFIG.gridSize);
         geometry.rotateX(-Math.PI / 2);
 
         const material = new THREE.ShaderMaterial({
@@ -168,12 +164,13 @@
 
             const elapsedTime = clock.getElapsedTime();
             material.uniforms.uTime.value = elapsedTime * CONFIG.speed;
-            terrain.rotation.y = Math.sin(elapsedTime * 0.05) * 0.05;
+            
+            // Reduced rotation speed further for stability
+            terrain.rotation.y = Math.sin(elapsedTime * 0.02) * 0.05;
 
             renderer.render(scene, camera);
         }
 
-        // --- Responsive Resize ---
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
